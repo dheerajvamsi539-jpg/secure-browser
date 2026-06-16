@@ -35,6 +35,7 @@ android.gradle_dependencies = androidx.webkit:webkit:1.9.0
 
 # (list) Permissions
 android.permissions = INTERNET, ACCESS_NETWORK_STATE
+android.extra_manifest_application_arguments = %(source.dir)s/manifest_application_arguments.xml
 
 # (str) Presplash of the application
 #presplash.filename = %(source.dir)s/data/presplash.png
