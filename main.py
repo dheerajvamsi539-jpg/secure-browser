@@ -218,7 +218,13 @@ if IS_ANDROID:
             @java_method('(Landroid/webkit/WebView;Landroid/webkit/WebResourceRequest;)Landroid/webkit/WebResourceResponse;')
             def shouldInterceptRequest(self, view, request):
                 url = request.getUrl().toString()
-                
+                return self.handle_intercept_url(url)
+
+            @java_method('(Landroid/webkit/WebView;Ljava/lang/String;)Landroid/webkit/WebResourceResponse;', name='shouldInterceptRequest')
+            def shouldInterceptRequestOld(self, view, url):
+                return self.handle_intercept_url(url)
+
+            def handle_intercept_url(self, url):
                 # HTTPS Upgrade for subresources
                 if self.app.https_enabled and url.startswith("http://"):
                     from urllib.parse import urlparse
@@ -244,6 +250,10 @@ if IS_ANDROID:
             @java_method('(Landroid/webkit/WebView;Landroid/webkit/WebResourceRequest;)Z')
             def shouldOverrideUrlLoading(self, view, request):
                 url = request.getUrl().toString()
+                return self.app.handle_navigation(view, url)
+
+            @java_method('(Landroid/webkit/WebView;Ljava/lang/String;)Z', name='shouldOverrideUrlLoading')
+            def shouldOverrideUrlLoadingOld(self, view, url):
                 return self.app.handle_navigation(view, url)
 
             @java_method('(Landroid/webkit/WebView;Ljava/lang/String;Landroid/graphics/Bitmap;)V')
@@ -699,21 +709,29 @@ if IS_ANDROID:
             self.rotate_btn.disabled = True
 
         def handle_navigation(self, view, url):
+            # Enforce HTTPS-Only upgrade for HTTP links (unless it's localhost)
             if url.startswith("http://"):
                 from urllib.parse import urlparse
                 parsed = urlparse(url)
                 host = parsed.netloc.split(':')[0]
                 if is_local_host(host):
-                    return False
+                    return False  # Let WebView load localhost HTTP internally
                 
+                # Upgrade standard HTTP to HTTPS
                 new_url = "https://" + url[7:]
                 from android.runnable import run_on_ui_thread
                 @run_on_ui_thread
-                def load():
+                def load_https():
                     view.loadUrl(new_url)
-                load()
-                return True
-            return False
+                load_https()
+                return True  # We handled the load by upgrading the URL
+                
+            # For HTTPS, about:, and data: links, let the WebView handle it internally (returns False)
+            if url.startswith("https://") or url.startswith("about:") or url.startswith("data:"):
+                return False
+                
+            # Block all other schemes (like intent://, market://, mailto:, etc.) to prevent launching external apps
+            return True
 
         @run_on_ui_thread
         def set_android_proxy(self, host, port):
