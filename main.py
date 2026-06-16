@@ -154,7 +154,7 @@ class LocalSocks5Proxy:
                     return
 
 # Check if running on Android
-IS_ANDROID = os.environ.get('ANDROID_ARGUMENT') is not None
+IS_ANDROID = os.environ.get('ANDROID_ARGUMENT') is not None or os.environ.get('MOCK_ANDROID') is not None
 if not IS_ANDROID:
     try:
         from kivy.utils import platform
@@ -178,82 +178,89 @@ if IS_ANDROID:
     from kivy.utils import platform
     from kivy.graphics import Color, Rectangle
 
-    from jnius import autoclass, cast, PythonJavaClass, java_method
-    from android.runnable import run_on_ui_thread
+    ACTUAL_ANDROID = (platform == 'android')
 
-    # Android native classes via PyJNIus
-    WebView = autoclass('android.webkit.WebView')
-    WebViewClient = autoclass('android.webkit.WebViewClient')
-    LayoutParams = autoclass('android.view.ViewGroup$LayoutParams')
-    LinearLayout = autoclass('android.widget.LinearLayout')
-    Activity = autoclass('org.kivy.android.PythonActivity').mActivity
-    Context = autoclass('android.content.Context')
-    ProxyController = autoclass('androidx.webkit.ProxyController')
-    ProxyConfig = autoclass('androidx.webkit.ProxyConfig')
-    Executor = autoclass('java.util.concurrent.Executor')
-    WebResourceResponse = autoclass('android.webkit.WebResourceResponse')
+    if ACTUAL_ANDROID:
+        from jnius import autoclass, cast, PythonJavaClass, java_method
+        from android.runnable import run_on_ui_thread
 
-    class PyRunnable(PythonJavaClass):
-        __javainterfaces__ = ['java/lang/Runnable']
+        # Android native classes via PyJNIus
+        WebView = autoclass('android.webkit.WebView')
+        WebViewClient = autoclass('android.webkit.WebViewClient')
+        LayoutParams = autoclass('android.view.ViewGroup$LayoutParams')
+        LinearLayout = autoclass('android.widget.LinearLayout')
+        Activity = autoclass('org.kivy.android.PythonActivity').mActivity
+        Context = autoclass('android.content.Context')
+        ProxyController = autoclass('androidx.webkit.ProxyController')
+        ProxyConfig = autoclass('androidx.webkit.ProxyConfig')
+        Executor = autoclass('java.util.concurrent.Executor')
+        WebResourceResponse = autoclass('android.webkit.WebResourceResponse')
 
-        def __init__(self, callback):
-            super().__init__()
-            self.callback = callback
+        class PyRunnable(PythonJavaClass):
+            __javainterfaces__ = ['java/lang/Runnable']
 
-        @java_method('()V')
-        def run(self):
-            if self.callback:
-                self.callback()
+            def __init__(self, callback):
+                super().__init__()
+                self.callback = callback
 
-    class MyWebViewClient(PythonJavaClass):
-        __javaclass__ = 'android/webkit/WebViewClient'
+            @java_method('()V')
+            def run(self):
+                if self.callback:
+                    self.callback()
 
-        def __init__(self, app):
-            super().__init__()
-            self.app = app
+        class MyWebViewClient(PythonJavaClass):
+            __javaclass__ = 'android/webkit/WebViewClient'
 
-        @java_method('(Landroid/webkit/WebView;Landroid/webkit/WebResourceRequest;)Landroid/webkit/WebResourceResponse;')
-        def shouldInterceptRequest(self, view, request):
-            url = request.getUrl().toString()
-            
-            # HTTPS Upgrade for subresources
-            if self.app.https_enabled and url.startswith("http://"):
-                from urllib.parse import urlparse
-                parsed = urlparse(url)
-                host = parsed.netloc.split(':')[0]
-                if not is_local_host(host):
-                    return WebResourceResponse("text/plain", "UTF-8", None)
-                    
-            # Ad blocker / tracker blocker
-            if self.app.adblock_enabled:
-                from urllib.parse import urlparse
-                parsed = urlparse(url)
-                host = parsed.netloc.split(':')[0].lower()
-                if not is_local_host(host):
-                    host_parts = host.split('.')
-                    for i in range(len(host_parts) - 1):
-                        parent = '.'.join(host_parts[i:])
-                        if parent in self.app.blocked_domains:
-                            return WebResourceResponse("text/plain", "UTF-8", None)
-                            
-            return None
+            def __init__(self, app):
+                super().__init__()
+                self.app = app
 
-        @java_method('(Landroid/webkit/WebView;Landroid/webkit/WebResourceRequest;)Z')
-        def shouldOverrideUrlLoading(self, view, request):
-            url = request.getUrl().toString()
-            return self.app.handle_navigation(view, url)
+            @java_method('(Landroid/webkit/WebView;Landroid/webkit/WebResourceRequest;)Landroid/webkit/WebResourceResponse;')
+            def shouldInterceptRequest(self, view, request):
+                url = request.getUrl().toString()
+                
+                # HTTPS Upgrade for subresources
+                if self.app.https_enabled and url.startswith("http://"):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    host = parsed.netloc.split(':')[0]
+                    if not is_local_host(host):
+                        return WebResourceResponse("text/plain", "UTF-8", None)
+                        
+                # Ad blocker / tracker blocker
+                if self.app.adblock_enabled:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    host = parsed.netloc.split(':')[0].lower()
+                    if not is_local_host(host):
+                        host_parts = host.split('.')
+                        for i in range(len(host_parts) - 1):
+                            parent = '.'.join(host_parts[i:])
+                            if parent in self.app.blocked_domains:
+                                return WebResourceResponse("text/plain", "UTF-8", None)
+                                
+                return None
 
-        @java_method('(Landroid/webkit/WebView;Ljava/lang/String;Landroid/graphics/Bitmap;)V')
-        def onPageStarted(self, view, url, favicon):
-            self.app.url_input.text = url
-            if self.app.js_enabled:
-                view.evaluateJavascript(self.app.injected_script_code, None)
+            @java_method('(Landroid/webkit/WebView;Landroid/webkit/WebResourceRequest;)Z')
+            def shouldOverrideUrlLoading(self, view, request):
+                url = request.getUrl().toString()
+                return self.app.handle_navigation(view, url)
 
-        @java_method('(Landroid/webkit/WebView;Ljava/lang/String;)V')
-        def onPageFinished(self, view, url):
-            self.app.url_input.text = url
-            if self.app.js_enabled:
-                view.evaluateJavascript(self.app.injected_script_code, None)
+            @java_method('(Landroid/webkit/WebView;Ljava/lang/String;Landroid/graphics/Bitmap;)V')
+            def onPageStarted(self, view, url, favicon):
+                self.app.url_input.text = url
+                if self.app.js_enabled:
+                    view.evaluateJavascript(self.app.injected_script_code, None)
+
+            @java_method('(Landroid/webkit/WebView;Ljava/lang/String;)V')
+            def onPageFinished(self, view, url):
+                self.app.url_input.text = url
+                if self.app.js_enabled:
+                    view.evaluateJavascript(self.app.injected_script_code, None)
+    else:
+        # Dummy decorator and placeholders for mock run on Linux desktop
+        def run_on_ui_thread(f):
+            return f
 
     class KivyProxyFetcher:
         def __init__(self, on_ready, on_error):
