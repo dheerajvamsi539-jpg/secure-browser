@@ -1,0 +1,19 @@
+# Environments
+venv/
+build_env/
+build_venv/
+build_tool_venv/
+
+# Buildozer and p4a caches
+.buildozer/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build logs
+build.log
+
+# Git / IDE settings
+.idea/
+.vscode/
