@@ -543,6 +543,9 @@ if IS_ANDROID:
 
         @run_on_ui_thread
         def init_webview(self):
+            WebView = autoclass('android.webkit.WebView')
+            Activity = autoclass('org.kivy.android.PythonActivity').mActivity
+            
             self.webview = WebView(Activity)
             
             # --- Android WebView Hardening & Attack Surface Reduction ---
@@ -557,9 +560,11 @@ if IS_ANDROID:
             
             # Disable cross-origin file resource access
             if hasattr(settings, 'setAllowFileAccessFromFileURLs'):
-                settings.setAllowFileAccessFromFileURLs(False)
+                try: settings.setAllowFileAccessFromFileURLs(False)
+                except Exception as e: print(f"Error setting setAllowFileAccessFromFileURLs: {e}")
             if hasattr(settings, 'setAllowUniversalAccessFromFileURLs'):
-                settings.setAllowUniversalAccessFromFileURLs(False)
+                try: settings.setAllowUniversalAccessFromFileURLs(False)
+                except Exception as e: print(f"Error setting setAllowUniversalAccessFromFileURLs: {e}")
                 
             # Disable password saving and geolocation to minimize data leak surface
             settings.setSavePassword(False)
@@ -567,7 +572,8 @@ if IS_ANDROID:
             
             # Enable Google Safe Browsing protection
             if hasattr(settings, 'setSafeBrowsingEnabled'):
-                settings.setSafeBrowsingEnabled(True)
+                try: settings.setSafeBrowsingEnabled(True)
+                except Exception as e: print(f"Error setting setSafeBrowsingEnabled: {e}")
                 
             # Block third-party cookies for privacy protection
             try:
@@ -711,14 +717,21 @@ if IS_ANDROID:
 
         @run_on_ui_thread
         def set_android_proxy(self, host, port):
-            proxy_config = ProxyConfig.Builder() \
-                .addProxyRule(f"socks://{host}:{port}") \
-                .addDirect().build()
-            
-            executor = Activity.getMainExecutor()
-            if not hasattr(self, '_proxy_listener') or self._proxy_listener is None:
-                self._proxy_listener = PyRunnable(lambda: print("Proxy override applied"))
-            ProxyController.getInstance().setProxyOverride(proxy_config, executor, self._proxy_listener)
+            try:
+                ProxyController = autoclass('androidx.webkit.ProxyController')
+                ProxyConfig = autoclass('androidx.webkit.ProxyConfig')
+                Activity = autoclass('org.kivy.android.PythonActivity').mActivity
+                
+                proxy_config = ProxyConfig.Builder() \
+                    .addProxyRule(f"socks://{host}:{port}") \
+                    .addDirect().build()
+                
+                executor = Activity.getMainExecutor()
+                if not hasattr(self, '_proxy_listener') or self._proxy_listener is None:
+                    self._proxy_listener = PyRunnable(lambda: print("Proxy override applied"))
+                ProxyController.getInstance().setProxyOverride(proxy_config, executor, self._proxy_listener)
+            except Exception as e:
+                print(f"Failed to set Android proxy: {e}")
 
         def on_start(self):
             from kivy.core.window import Window
@@ -732,6 +745,7 @@ if IS_ANDROID:
                     import gc
                     gc.collect()
                     if platform == 'android':
+                        Activity = autoclass('org.kivy.android.PythonActivity').mActivity
                         Activity.finishAndRemoveTask()
                     else:
                         sys.exit(0)
