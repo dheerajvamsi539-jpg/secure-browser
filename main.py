@@ -537,9 +537,38 @@ if IS_ANDROID:
         @run_on_ui_thread
         def init_webview(self):
             self.webview = WebView(Activity)
-            self.webview.getSettings().setJavaScriptEnabled(True)
-            self.webview.getSettings().setDomStorageEnabled(True)
-            self.webview.getSettings().setDatabaseEnabled(True)
+            
+            # --- Android WebView Hardening & Attack Surface Reduction ---
+            settings = self.webview.getSettings()
+            settings.setJavaScriptEnabled(True)
+            settings.setDomStorageEnabled(True)
+            settings.setDatabaseEnabled(True)
+            
+            # Disable file and content access to prevent local file retrieval by malicious JS
+            settings.setAllowFileAccess(False)
+            settings.setAllowContentAccess(False)
+            
+            # Disable cross-origin file resource access
+            if hasattr(settings, 'setAllowFileAccessFromFileURLs'):
+                settings.setAllowFileAccessFromFileURLs(False)
+            if hasattr(settings, 'setAllowUniversalAccessFromFileURLs'):
+                settings.setAllowUniversalAccessFromFileURLs(False)
+                
+            # Disable password saving and geolocation to minimize data leak surface
+            settings.setSavePassword(False)
+            settings.setGeolocationEnabled(False)
+            
+            # Enable Google Safe Browsing protection
+            if hasattr(settings, 'setSafeBrowsingEnabled'):
+                settings.setSafeBrowsingEnabled(True)
+                
+            # Block third-party cookies for privacy protection
+            try:
+                CookieManager = autoclass('android.webkit.CookieManager')
+                CookieManager.getInstance().setAcceptThirdPartyCookies(self.webview, False)
+            except Exception as e:
+                print(f"Could not disable third party cookies: {e}")
+            # -------------------------------------------------------------
             
             self.webview_client = MyWebViewClient(self)
             self.webview.setWebViewClient(self.webview_client)
@@ -886,6 +915,19 @@ else:
             settings.setAttribute(QWebEngineSettings.WebAttribute.WebRTCPublicInterfacesOnly, True)
             settings.setAttribute(QWebEngineSettings.WebAttribute.DnsPrefetchEnabled, False)
             settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+            
+            # --- PyQt6 (Chromium) Hardening & Attack Surface Reduction ---
+            # Disable local file URLs loading remote content and vice versa
+            if hasattr(QWebEngineSettings.WebAttribute, "LocalContentCanAccessFileUrls"):
+                settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, False)
+            if hasattr(QWebEngineSettings.WebAttribute, "LocalContentCanAccessRemoteUrls"):
+                settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
+            if hasattr(QWebEngineSettings.WebAttribute, "AllowRunningInsecureContent"):
+                settings.setAttribute(QWebEngineSettings.WebAttribute.AllowRunningInsecureContent, False)
+            # Disable PDF Viewer to reduce attack surface
+            if hasattr(QWebEngineSettings.WebAttribute, "PdfViewerEnabled"):
+                settings.setAttribute(QWebEngineSettings.WebAttribute.PdfViewerEnabled, False)
+            # --------------------------------------------------------------
             
             if hasattr(QWebEngineSettings.WebAttribute, "ReadingFromCanvasEnabled"):
                 settings.setAttribute(QWebEngineSettings.WebAttribute.ReadingFromCanvasEnabled, False)
@@ -1263,6 +1305,12 @@ if __name__ == "__main__":
     if IS_ANDROID:
         SecureBrowserAndroid().run()
     else:
+        # Enforce Chromium process-level security sandboxing and memory defenses
+        chrome_flags = ["--enable-sandbox", "--disable-dev-shm-usage"]
+        for flag in chrome_flags:
+            if flag not in sys.argv:
+                sys.argv.append(flag)
+                
         app = QApplication(sys.argv)
         
         # Start local SOCKS5 proxy
